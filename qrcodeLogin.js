@@ -22,7 +22,6 @@ function appendSummary(markdown) {
   if (!SUMMARY_FILE) return
   try {
     fs.appendFileSync(SUMMARY_FILE, markdown + '\n')
-    // 验证写入成功
     const size = fs.statSync(SUMMARY_FILE).size
     if (size > 0) {
       console.log(`[Summary] 已追加 ${Buffer.byteLength(markdown)} 字节，总计 ${size} 字节`)
@@ -33,29 +32,25 @@ function appendSummary(markdown) {
 }
 
 /**
- * 生成并展示单个二维码 — 三重展示渠道确保用户一定能扫到：
+ * 生成并展示单个二维码 — 展示渠道：
  *
- *   ① 自包含 HTML 页面（qr/login.html）：浏览器打开即见大图，手机直接扫
- *      ← 最可靠，不依赖任何平台限制，artifact 立即可下载
- *   ② Step Summary 摘要页：<img> data URI 图片，在 Actions Summary 标签页查看
- *   ③ PNG 文件（qr/qr-N.png）：高清原图，artifact 下载备用
+ *   ① PNG 文件（qr/qr-N.png）：Release 直链 + HTML 内嵌双用途
+ *   ② 自包含 HTML 页面（qr/login.html）：浏览器打开即见大图，手机直接扫
+ *   ③ base64 data URI：HTML <img> 共用
  *
  * @param {string} url   酷狗扫码登录完整 URL
  * @param {number} index 账号序号（从 1 开始）
  * @param {number} total 总账号数
- * @returns {{ dataUrl: string, url: string }} 供 HTML 聚合用
+ * @returns {{ dataUrl: string, url: string, header: string, index: number }} 供 HTML 聚合用
  */
 async function buildQr(url, index, total) {
   const header = total > 1 ? `（第 ${index}/${total} 个账号）` : ''
 
-  fs.mkdirSync(QR_DIR, { recursive: true })
-
-  // ── 1) PNG 文件（artifact 下载 + HTML 内嵌双用途）──
+  // ── 1) PNG 文件（Release 直链 + HTML 内嵌双用途）──
   await QRCode.toFile(`${QR_DIR}/qr-${index}.png`, url, { width: 320, margin: 2 })
 
-  // ── 2) base64 data URI（Summary <img> + HTML <img> 共用）──
+  // ── 2) base64 data URI（HTML <img> 共用）──
   const dataUrl = await QRCode.toDataURL(url, { width: 320, margin: 2 })
-  const pngBase64 = dataUrl.replace(/^data:image\/png;base64,/, '')
 
   // ── 3) 日志输出：指引去直链步骤 ──
   printMagenta(`\n═══ 第 ${index}/${total} 个二维码已生成 ═══`)
@@ -128,24 +123,26 @@ body{
 </html>`
 }
 
-/** 解析账号数量 */
+/** 解析账号数量，无效输入回退为 1 */
 function resolveNumber() {
   const args = process.argv.slice(3)
-  return parseInt(process.env.NUMBER || args[0] || "1")
+  const n = parseInt(process.env.NUMBER || args[0] || "1")
+  return (Number.isNaN(n) || n < 1) ? 1 : n
 }
 
 /**
- * 模式一：生成二维码（PNG + Summary + HTML），随后立即结束 step。
- * step 结束后 artifact 即可下载 HTML 页面（含大图），用户浏览器打开直接扫码。
+ * 模式一：生成二维码（PNG + HTML），随后立即结束 step。
+ * step 结束后 Release 直链即可使用，用户浏览器打开直接扫码。
  */
 async function genMode() {
   const api = startService()
   await delay(2000)
-  const USERINFO = process.env.USERINFO
-  const APPEND_USER = process.env.APPEND_USER
-  const userinfo = (USERINFO && APPEND_USER == "是") ? JSON.parse(USERINFO) : []
   const number = resolveNumber()
   const keys = []
+
+  // 清理上次运行残留的 QR 文件，避免旧二维码混入本次 Release
+  fs.rmSync(QR_DIR, { recursive: true, force: true })
+  fs.mkdirSync(QR_DIR, { recursive: true })
 
   if (!SUMMARY_FILE) {
     console.log('[INFO] 非 Actions 环境（$GITHUB_STEP_SUMMARY 未设置），Summary 将跳过')
@@ -190,16 +187,16 @@ async function genMode() {
     fs.writeFileSync(KEYS_FILE, JSON.stringify({ number, keys }))
     printMagenta(`\n✅ 已生成 ${number} 个二维码。`)
     printMagenta(`🔗 请查看下一步「发布二维码图片直链」输出的可点击链接，浏览器打开即可直接扫码！`)
+
+    // 写入 Summary 提示
+    appendSummary(`## 🎵 酷狗音乐扫码登录\n\n✅ 已生成 ${number} 个二维码，请查看下一步「发布二维码图片直链」输出的链接进行扫码。\n\n⏳ 二维码有效期约 2 分钟，请尽快扫描。`)
   } catch (e) {
     const msg = e && e.message ? e.message : String(e)
     console.error(`::error::二维码生成失败：${msg}`)
+    appendSummary(`## ❌ 二维码生成失败\n\n错误信息：${msg}`)
     throw e
   } finally {
-    // 强制关闭 API 服务（加超时防止挂死）
-    await Promise.race([
-      close_api(api),
-      new Promise(r => setTimeout(r, 3000))
-    ])
+    close_api(api)
   }
 }
 
@@ -220,11 +217,19 @@ async function waitMode() {
   const APPEND_USER = process.env.APPEND_USER
   const userinfo = (USERINFO && APPEND_USER == "是") ? JSON.parse(USERINFO) : []
 
+  const results = [] // 收集每个账号的扫码结果用于 Summary
+
   try {
     for (let n = 0; n < number; n++) {
       const qrcode = keys[n]
+      if (!qrcode) {
+        printRed(`第 ${n + 1}/${number} 个账号的二维码密钥缺失，跳过`)
+        results.push({ index: n + 1, status: '密钥缺失' })
+        continue
+      }
       printMagenta(`\n正在等待第 ${n + 1}/${number} 个账号扫码登录...`)
       let loggedIn = false
+      let expireFlag = false
       for (let i = 0; i < 30; i++) {
         const timestrap = Date.now();
         const res = await send(`/login/qr/check?key=${qrcode}&timestrap=${timestrap}`, "GET", {})
@@ -232,6 +237,7 @@ async function waitMode() {
         switch (status) {
           case 0:
             printYellow("二维码已过期，请重新运行工作流生成新二维码")
+            expireFlag = true
             break
           case 1:
             // 未扫描二维码
@@ -248,21 +254,26 @@ async function waitMode() {
             printRed("请求出错")
             console.dir(summarizeResponse(res), { depth: null })
         }
-        if (loggedIn || status == 0) {
+        if (loggedIn || expireFlag) {
           break
         }
-        if (i == 29) {
+        if (i === 29) {
           printRed("等待超时\n")
         }
         await delay(5000)
       }
+      results.push({
+        index: n + 1,
+        status: loggedIn ? '✅ 登录成功' : (expireFlag ? '❌ 二维码过期' : '❌ 等待超时')
+      })
     }
     saveUserinfo(userinfo)
+
+    // 写入扫码结果到 Summary
+    const resultLines = results.map(r => `- 账号 ${r.index}/${number}：${r.status}`).join('\n')
+    appendSummary(`### 扫码结果\n\n${resultLines}`)
   } finally {
-    await Promise.race([
-      close_api(api),
-      new Promise(r => setTimeout(r, 3000))
-    ])
+    close_api(api)
   }
 }
 

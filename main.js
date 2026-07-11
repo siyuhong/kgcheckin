@@ -8,7 +8,6 @@ async function main() {
 
   const USERINFO = process.env.USERINFO
   // 刷新token
-  const refreshUserinfo = []
   let needRefresh = false
   if (!USERINFO) {
     throw new Error("未配置")
@@ -60,7 +59,7 @@ async function main() {
       printMagenta(`账号 ${safeNickname} 开始领取VIP...`)
 
       // 周日刷新token
-      if (today.getDay() == 0) {
+      if (today.getDay() === 0) {
         const refreshToken = await send(`/login/token?timestrap=${Date.now()}`, "POST", headers)
         if (refreshToken?.status == 1) {
           if (refreshToken?.data?.token !== user.token) {
@@ -69,7 +68,6 @@ async function main() {
             user.token = refreshToken.data.token
           }
         }
-        refreshUserinfo.push(user)
       }
 
       // 开始听歌
@@ -117,7 +115,7 @@ async function main() {
 
       let vipExpiry = '未知'
       const vip_details = await send(`/user/vip/detail?timestrap=${Date.now()}`, "GET", headers)
-      if (vip_details.status === 1) {
+      if (vip_details.status === 1 && Array.isArray(vip_details.data?.busi_vip) && vip_details.data.busi_vip.length > 0) {
         vipExpiry = vip_details.data.busi_vip[0].vip_end_time
         printBlue(`今天是：${date}`)
         printBlue(`VIP到期时间：${vipExpiry}\n`)
@@ -141,11 +139,10 @@ async function main() {
     close_api(api)
   }
 
-  // 更新secret <USERINFO>
-  if (refreshUserinfo.length > 0 && needRefresh) {
-
+  // 更新secret <USERINFO>（使用完整 userinfo 数组，保留所有用户包括过期账号）
+  if (needRefresh) {
     if (hasSecretWriteToken()) {
-      const userinfoJSON = JSON.stringify(refreshUserinfo)
+      const userinfoJSON = JSON.stringify(userinfo)
       try {
         setRepoSecret("USERINFO", userinfoJSON)
         printGreen("secret <USERINFO> token刷新成功")
@@ -157,7 +154,6 @@ async function main() {
     } else {
       printYellow("存在账号需要刷新token，但是未配置PAT，未刷新token最多两个月后过期")
     }
-
   }
 
   // 构建通知内容
@@ -191,9 +187,6 @@ async function main() {
     throw new Error("领取异常")
   }
 
-  if (api.killed) {
-    process.exit(0)
-  }
 }
 
-main()
+main().then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1) })

@@ -26,10 +26,6 @@ async function login() {
   } finally {
     close_api(api)
   }
-
-  if (api.killed) {
-    process.exit(0)
-  }
 }
 
-login()
+login().then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1) })

@@ -73,8 +73,6 @@ jobs:
         run: node qrcodeLogin.js gen
         env:
           NUMBER: ${{ github.event.inputs.number }}
-          USERINFO: ${{ secrets.USERINFO }}
-          APPEND_USER: ${{ github.event.inputs.append_user }}
 
       # ════════════════════════════════════════════
       #   步骤二（核心）：发布二维码为 GitHub Release 直链
@@ -93,13 +91,28 @@ jobs:
             --notes "用「酷狗音乐 APP」扫描下方二维码完成登录（约 2 分钟内有效）"
 
           echo ""
-          echo "══════════════════════════════════════════════════════════"
+          echo "═══════════════════════════════════════════════════════"
           echo "  📱 点击下方链接，浏览器直接显示二维码图片（无需解压）："
-          echo "══════════════════════════════════════════════════════════"
+          echo "═══════════════════════════════════════════════════════"
           for f in qr/*.png; do
             echo "  🔗 https://github.com/${{ github.repository }}/releases/download/$TAG/$(basename "$f")"
           done
-          echo "══════════════════════════════════════════════════════════"
+          echo "═══════════════════════════════════════════════════════"
+
+          # 写入 Summary 页面，用户直接在 Summary 即可看到扫码链接
+          {
+            echo "## 🎵 酷狗音乐扫码登录"
+            echo ""
+            echo "请点击下方链接，浏览器打开即可扫码（约 2 分钟内有效）："
+            echo ""
+            for f in qr/*.png; do
+              echo "- 🔗 [账号 $(basename "$f" .png | sed 's/qr-//')] https://github.com/${{ github.repository }}/releases/download/$TAG/$(basename "$f")"
+            done
+            echo ""
+            echo "🌐 [HTML 登录页（含所有二维码）](https://github.com/${{ github.repository }}/releases/download/$TAG/login.html)"
+            echo ""
+            echo "⏳ 二维码有效期约 2 分钟，请尽快扫描"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # ═══ 备用：HTML 仍上传为 artifact（万一 Release 失败兜底）═══
       - name: 上传二维码 HTML 页面（兜底备份）
@@ -127,7 +140,7 @@ jobs:
       #   步骤三：轮询等待用户扫码确认
       #   ════════════════════════════════════════════
       - name: 等待扫码登录
-        if: ${{ always() }}
+        if: ${{ always() && steps.gen.outcome == 'success' }}
         run: node qrcodeLogin.js wait
         env:
           USERINFO: ${{ secrets.USERINFO }}
