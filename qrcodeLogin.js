@@ -1,7 +1,29 @@
+import { createRequire } from 'module'
 import { close_api, delay, send, startService } from "./utils/utils.js";
 import { printGreen, printMagenta, printRed, printYellow } from "./utils/colorOut.js";
 import { summarizeResponse } from "./utils/safeLog.js";
 import { upsertUser, saveUserinfo } from "./utils/userinfo.js";
+
+const require = createRequire(import.meta.url)
+const QRCode = require('./api/node_modules/qrcode')
+
+/**
+ * 在终端渲染二维码
+ * @param {string} url - 需要编码为二维码的 URL
+ */
+async function printQrcode(url) {
+  try {
+    const qrTerminal = await QRCode.toString(url, {
+      type: 'terminal',
+      small: true,
+    })
+    console.log(qrTerminal)
+  } catch {
+    // 降级：输出 URL 供手动打开
+    printYellow(`二维码渲染失败，请手动打开此链接扫码：`)
+    console.log(url)
+  }
+}
 
 async function qrcode() {
 
@@ -20,12 +42,11 @@ async function qrcode() {
       const result = await send(`/login/qr/key?timestrap=${Date.now()}`, "GET", {})
       if (result.status === 1) {
         qrcode = result.data.qrcode
-        const img_base64 = result.data.qrcode_img;
-        const chunkSize = 1000;
-        printMagenta("二维码链接如下, 请在浏览器打开使用APP扫描并确认登录")
-        for (let j = 0; j < img_base64.length; j += chunkSize) {
-          console.log(img_base64.slice(j, j + chunkSize));
-        }
+        const qrUrl = `https://h5.kugou.com/apps/loginQRCode/html/index.html?qrcode=${qrcode}`
+        printMagenta("请使用酷狗音乐 APP 扫描下方二维码登录")
+        await printQrcode(qrUrl)
+        printMagenta(`如二维码无法扫描，请复制此链接到浏览器打开：`)
+        printMagenta(qrUrl)
       } else {
         printRed("响应内容")
         console.dir(summarizeResponse(result), { depth: null })

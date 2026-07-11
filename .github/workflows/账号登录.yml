@@ -1,24 +1,33 @@
-name: qrcodeLogin
+name: 账号登录
 on:
   workflow_dispatch:
     inputs:
-      number:
-        description: "需要登录几个账号？"
+      login_method:
+        description: "登录方式"
         required: true
-        default: 1
+        type: choice
+        default: "二维码登录"
+        options:
+          - 二维码登录
+          - 发送验证码
+          - 手机号登录
+      number:
+        description: "二维码登录：需要登录几个账号？"
+        required: false
+        default: "1"
       append_user:
         description: "是否追加新账号？（不删除已存在账号信息）"
         required: true
-        default: "否"
         type: choice
+        default: "否"
         options:
           - 是
           - 否
       print_userinfo:
-        description: "自动写入失败时是否在日志输出 USERINFO？含登录token，默认否"
+        description: "自动写入失败时是否在日志输出 USERINFO？（含登录token，默认否）"
         required: true
-        default: "否"
         type: choice
+        default: "否"
         options:
           - 否
           - 是
@@ -27,16 +36,18 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: 检出仓库
         uses: actions/checkout@v6
-      - name: 创建node
+      - name: 创建 Node 环境
         uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: 'npm'
           cache-dependency-path: ./api/package-lock.json
-      - name: 🔧 检查GitHub CLI
+      - name: 检查 GitHub CLI
+        if: github.event.inputs.login_method != '发送验证码'
         run: |
           if ! command -v gh >/dev/null 2>&1; then
             curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
@@ -46,7 +57,7 @@ jobs:
             sudo apt install gh -y
           fi
           gh --version
-      - name: Cache node_modules in api directory
+      - name: 缓存依赖
         id: cache-npm
         uses: actions/cache@v5
         with:
@@ -58,9 +69,26 @@ jobs:
         run: npm run install
         if: ${{ steps.cache-npm.outputs.cache-hit != 'true' }}
       - name: 二维码登录
+        if: github.event.inputs.login_method == '二维码登录'
         run: npm run qrcodeLogin
         env:
           NUMBER: ${{ github.event.inputs.number }}
+          PAT: ${{ secrets.PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          USERINFO: ${{ secrets.USERINFO }}
+          APPEND_USER: ${{ github.event.inputs.append_user }}
+          ALLOW_PRINT_USERINFO: ${{ github.event.inputs.print_userinfo }}
+      - name: 发送验证码
+        if: github.event.inputs.login_method == '发送验证码'
+        run: npm run sent
+        env:
+          PHONE: ${{ secrets.PHONE }}
+      - name: 手机号登录
+        if: github.event.inputs.login_method == '手机号登录'
+        run: npm run phoneLogin
+        env:
+          PHONE: ${{ secrets.PHONE }}
+          CODE: ${{ secrets.CODE }}
           PAT: ${{ secrets.PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           USERINFO: ${{ secrets.USERINFO }}

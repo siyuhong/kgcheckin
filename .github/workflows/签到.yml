@@ -1,7 +1,6 @@
-name: main
+name: 签到
 on:
   workflow_dispatch:
-  # push:
   schedule:
     - cron: '10 17 * * *'
 permissions:
@@ -12,13 +11,13 @@ jobs:
     steps:
       - name: 检出仓库
         uses: actions/checkout@v6
-      - name: 创建node
+      - name: 创建 Node 环境
         uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: 'npm'
           cache-dependency-path: ./api/package-lock.json
-      - name: 🔧 检查GitHub CLI
+      - name: 检查 GitHub CLI
         run: |
           if ! command -v gh >/dev/null 2>&1; then
             curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
@@ -28,7 +27,7 @@ jobs:
             sudo apt install gh -y
           fi
           gh --version
-      - name: Cache node_modules in api directory
+      - name: 缓存依赖
         id: cache-npm
         uses: actions/cache@v5
         with:
@@ -39,7 +38,7 @@ jobs:
       - name: 安装依赖
         run: npm run install
         if: ${{ steps.cache-npm.outputs.cache-hit != 'true' }}
-      - name: 签到
+      - name: 执行签到
         run: npm run main
         env:
           USERINFO: ${{ secrets.USERINFO }}
